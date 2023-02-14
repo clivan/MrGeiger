@@ -1,60 +1,68 @@
 /*
-  GPS Location
+ * Created by ArduinoGetStarted.com
+ *
+ * This example code is in the public domain
+ *
+ * Tutorial page: https://arduinogetstarted.com/tutorials/arduino-gps
+ */
 
-  This sketch uses the GPS to determine the location of the board
-  and prints it to the Serial monitor.
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
 
-  Circuit:
-   - MKR board
-   - MKR GPS attached via I2C cable
-
-  This example code is in the public domain.
-*/
-
-#include <Arduino_MKRGPS.h>
+const int RXPin = 3, TXPin = 4;
+const uint32_t GPSBaud = 9600; //Default baud of NEO-6M is 9600
+TinyGPSPlus gps; // the TinyGPS++ object
+SoftwareSerial gpsSerial(RXPin, TXPin); // the serial interface to the GPS device
 
 void setup() {
-  // initialize serial communications and wait for port to open:
   Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
-
-  // If you are using the MKR GPS as shield, change the next line to pass
-  // the GPS_MODE_SHIELD parameter to the GPS.begin(...)
-  if (!GPS.begin()) {
-    Serial.println("Failed to initialize GPS!");
-    while (1);
-  }
+  gpsSerial.begin(GPSBaud);
+  Serial.println(F("Arduino - GPS module"));
 }
 
 void loop() {
-  // check if there is new GPS data available
-  if (GPS.available()) {
-    // read GPS values
-    float latitude   = GPS.latitude();
-    float longitude  = GPS.longitude();
-    float altitude   = GPS.altitude();
-    float speed      = GPS.speed();
-    int   satellites = GPS.satellites();
+  if (gpsSerial.available() > 0) {
+    if (gps.encode(gpsSerial.read())) {
+      if (gps.location.isValid()) {
+        Serial.print(F("- latitude: "));
+        Serial.println(gps.location.lat());
+        Serial.print(F("- longitude: "));
+        Serial.println(gps.location.lng());
+        Serial.print(F("- altitude: "));
+        if (gps.altitude.isValid())
+          Serial.println(gps.altitude.meters());
+        else
+          Serial.println(F("INVALID"));
+      } else {
+        Serial.println(F("- location: INVALID"));
+      }
 
-    // print GPS values
-    Serial.print("Location: ");
-    Serial.print(latitude, 7);
-    Serial.print(", ");
-    Serial.println(longitude, 7);
-
-    Serial.print("Altitude: ");
-    Serial.print(altitude);
-    Serial.println("m");
-
-    Serial.print("Ground speed: ");
-    Serial.print(speed);
-    Serial.println(" km/h");
-
-    Serial.print("Number of satellites: ");
-    Serial.println(satellites);
-
-    Serial.println();
+      Serial.print(F("- speed: "));
+      if (gps.speed.isValid()) {
+        Serial.print(gps.speed.kmph());
+        Serial.println(F(" km/h"));
+      } else {
+        Serial.println(F("INVALID"));
+      }
+      Serial.print(F("- GPS date&time: "));
+      if (gps.date.isValid() && gps.time.isValid()) {
+        Serial.print(gps.date.year());
+        Serial.print(F("-"));
+        Serial.print(gps.date.month());
+        Serial.print(F("-"));
+        Serial.print(gps.date.day());
+        Serial.print(F(" "));
+        Serial.print(gps.time.hour());
+        Serial.print(F(":"));
+        Serial.print(gps.time.minute());
+        Serial.print(F(":"));
+        Serial.println(gps.time.second());
+      } else {
+        Serial.println(F("INVALID"));
+      }
+      Serial.println();
+    }
   }
+  if (millis() > 5000 && gps.charsProcessed() < 10)
+    Serial.println(F("No GPS data received: check wiring"));
 }

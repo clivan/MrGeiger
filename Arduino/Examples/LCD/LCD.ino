@@ -23,42 +23,31 @@
  * ends to +5V and ground
  * wiper to LCD VO pin (pin 3)
 
- Library originally added 18 Apr 2008
- by David A. Mellis
- library modified 5 Jul 2009
- by Limor Fried (http://www.ladyada.net)
- example added 9 Jul 2009
- by Tom Igoe
- modified 22 Nov 2010
- by Tom Igoe
- modified 7 Nov 2016
- by Arturo Guadalupi
-
  This example code is in the public domain.
 
  http://www.arduino.cc/en/Tutorial/LiquidCrystalHelloWorld
 
 */
 
-// include the library code:
+//Include the library code:
 #include <LiquidCrystal.h>
 
-// initialize the library by associating any needed LCD interface pin
-// with the arduino pin number it is connected to
-const int rs = 9, en = 10, d4 = 6, d5 = 8, d6 = 5, d7 = 7;
+//Initialize the library by associating any needed LCD interface pin
+//With the arduino pin number it is connected to
+const int rs=9, en=10, d4=6, d5=8, d6=5, d7=7;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 void setup() {
-  // set up the LCD's number of columns and rows:
+  //Set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
-  // Print a message to the LCD.
+  //Print a message to the LCD.
   lcd.print("hello, world!");
 }
 
 void loop() {
-  // set the cursor to column 0, line 1
-  // (note: line 1 is the second row, since counting begins with 0):
+  //Set the cursor to column 0, line 1
+  //(Note: line 1 is the second row, since counting begins with 0):
   lcd.setCursor(0, 1);
-  // print the number of seconds since reset:
+  //Print the number of seconds since reset:
   lcd.print(millis() / 1000);
 }

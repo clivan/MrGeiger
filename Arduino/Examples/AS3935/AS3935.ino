@@ -1,153 +1,157 @@
+/*
+  This example code will walk you through the rest of the functions not
+  mentioned in the other example code. This includes different ways to reduce
+  false events, how to power down (and what that entails) and wake up your
+  board, as well as how to reset all the settings to their factory defaults. 
+  By: Elias Santistevan
+  SparkFun Electronics
+  Date: July, 2019
+  License: This code is public domain but you buy me a beer if you use this and we meet someday (Beerware license).
+*/
+
 #include <SPI.h>
-#include <AS3935.h>
+#include <Wire.h>
+#include "SparkFun_AS3935.h"
 
-void printAS3935Registers();
+// 0x03 is default, but the address can also be 0x02, or 0x01.
+// Adjust the address jumpers on the underside of the product. 
+#define AS3935_ADDR 0x03 
+#define INDOOR 0x12 
+#define OUTDOOR 0xE
+#define LIGHTNING_INT 0x08
+#define DISTURBER_INT 0x04
+#define NOISE_INT 0x01
 
-// Function prototype that provides SPI transfer and is passed to
-// AS3935 to be used from within library, it is defined later in main sketch.
-// That is up to user to deal with specific implementation of SPI
-// Note that AS3935 library requires this function to have exactly this signature
-// and it can not be member function of any C++ class, which happens
-// to be almost any Arduino library
-// Please make sure your implementation of choice does not deal with CS pin,
-// library takes care about it on it's own
-byte SPItransfer(byte sendByte);
-// tunecap is needed to display the calibration register value
-int tunecap;
-
-// Iterrupt handler for AS3935 irqs
-// and flag variable that indicates interrupt has been triggered
-// Variables that get changed in interrupt routines need to be declared volatile
-// otherwise compiler can optimize them away, assuming they never get changed
-void AS3935Irq();
-// volatile int AS3935IrqTriggered; – not needed anymore
-
-// First parameter – SPI transfer function, second – Arduino pin used for CS
-// and finally third argument – Arduino pin used for IRQ
-// It is good idea to chose pin that has interrupts attached, that way one can use
-// attachInterrupt in sketch to detect interrupt
-// Library internally polls this pin when doing calibration, so being an interrupt pin
-// is not a requirement
-AS3935 AS3935(SPItransfer,10,2); //change to AS3935(SPITransfer,9,3) if using slot #2
-// AS3935 AS3935(SPItransfer,77,26); //if using Flip & Click socket A
-
+// If you're using I-squared-C then keep the following line. Address is set to
+// default. 
+SparkFun_AS3935 lightning(AS3935_ADDR);
+// Interrupt pin for lightning detection 
+const int lightningInt = 4; 
+// Values for modifying the IC's settings. All of these values are set to their
+// default values. 
+byte noiseFloor = 2;
+byte watchDogVal = 2;
+byte spike = 2;
+byte lightningThresh = 1; 
+// This variable holds the number representing the lightning or non-lightning
+// event issued by the lightning detector. 
+byte intVal = 0; 
 void setup()
 {
-  Serial.begin(9600);
-  // first begin, then set parameters
-  SPI.begin();
-  // NB! chip uses SPI MODE1
-  SPI.setDataMode(SPI_MODE1);
-  // NB! max SPI clock speed that chip supports is 2MHz,
-  // but never use 500kHz, because that will cause interference
-  // to lightning detection circuit
-  SPI.setClockDivider(SPI_CLOCK_DIV16);
-  // and chip is MSB first
-  SPI.setBitOrder(MSBFIRST);
-  // reset all internal register values to defaults
-  AS3935.reset();
-  delay(10);
-  AS3935.setOutdoors();
-  AS3935.registerWrite(AS3935_NF_LEV,2);
-  // and run calibration
-  // if lightning detector can not tune tank circuit to required tolerance,
-  // calibration function will return false
-  if(!AS3935.calibrate())
-    Serial.println("Tuning out of range, check your wiring, your sensor and make sure physics laws have not changed!");
-  // now we print the value in the calibration register TUN_CAP
-  // it is in the range 0 – 15
-  tunecap=AS3935.registerRead(AS3935_TUN_CAP);
-  Serial.print("Tuning cap register is ");
-  Serial.println(tunecap);
-
-  // since this is demo code, we just go on minding our own business and ignore the fact that someone divided by zero
-
-  // first let's turn on disturber indication and print some register values from AS3935
-  // tell AS3935 we are indoors, for outdoors use setOutdoors() function
-  // AS3935.setOutdoors();
-  // turn on indication of distrubers, once you have AS3935 all tuned, you can turn those off with disableDisturbers()
-  AS3935.enableDisturbers();
-  printAS3935Registers();
-  // AS3935IrqTriggered = 0;
-  // Using interrupts means you do not have to check for pin being set continiously, chip does that for you and
-  // notifies your code
-  // demo is written and tested on ChipKit MAX32, irq pin is connected to max32 pin 2, that corresponds to interrupt 1
-  // look up what pins can be used as interrupts on your specific board and how pins map to int numbers
-  // ChipKit Max32 – irq connected to pin 2, or Arduino with irq connected to pin 3
-  // Uncomment the next line if using slot #2 of the Arduino mikroBUS adapter
-  // attachInterrupt(1,AS3935Irq,RISING);
-  // uncomment line below and comment out line above for Arduino Mega 2560, irq still connected to pin 2
-  attachInterrupt(0,AS3935Irq,RISING);
-  // attachInterrupt(digitalPinToInterrupt(26),AS3935Irq,RISING); // if using Flip & Click socket A
+  // When lightning is detected the interrupt pin goes HIGH.
+  pinMode(lightningInt, INPUT); 
+  Serial.begin(115200); 
+  Serial.println("AS3935 Franklin Lightning Detector"); 
+  Wire.begin(); // Begin Wire before lightning sensor. 
+  if( !lightning.begin() )
+  { // Initialize the sensor. 
+    Serial.println ("Lightning Detector did not start up, freezing!"); 
+    while(1); 
+  }
+  else
+    Serial.println("Schmow-ZoW, Lightning Detector Ready!\n");
+  // "Disturbers" are events that are false lightning events. If you find
+  // yourself seeing a lot of disturbers you can have the chip not report those
+  // events on the interrupt lines. 
+  lightning.maskDisturber(true); 
+  int maskVal=lightning.readMaskDisturber();
+  Serial.print("Are disturbers being masked: "); 
+  if (maskVal==1)
+    Serial.println("YES"); 
+  else if (maskVal==0)
+    Serial.println("NO"); 
+  // The lightning detector defaults to an indoor setting (less
+  // gain/sensitivity), if you plan on using this outdoors 
+  // uncomment the following line:
+  //lightning.setIndoorOutdoor(OUTDOOR); 
+  int enviVal=lightning.readIndoorOutdoor();
+  Serial.print("Are we set for indoor or outdoor: ");  
+  if( enviVal==INDOOR )
+    Serial.println("Indoor.");  
+  else if( enviVal==OUTDOOR )
+    Serial.println("Outdoor.");  
+  else 
+    Serial.println(enviVal, BIN); 
+  // Noise floor setting from 1-7, one being the lowest. Default setting is
+  // two. If you need to check the setting, the corresponding function for
+  // reading the function follows.    
+  lightning.setNoiseLevel(noiseFloor);  
+  int noiseVal=lightning.readNoiseLevel();
+  Serial.print("Noise Level is set at: ");
+  Serial.println(noiseVal);
+  // Watchdog threshold setting can be from 1-10, one being the lowest. Default setting is
+  // two. If you need to check the setting, the corresponding function for
+  // reading the function follows.    
+  lightning.watchdogThreshold(watchDogVal); 
+  int watchVal=lightning.readWatchdogThreshold();
+  Serial.print("Watchdog Threshold is set to: ");
+  Serial.println(watchVal);
+  // Spike Rejection setting from 1-11, one being the lowest. Default setting is
+  // two. If you need to check the setting, the corresponding function for
+  // reading the function follows.    
+  // The shape of the spike is analyzed during the chip's
+  // validation routine. You can round this spike at the cost of sensitivity to
+  // distant events. 
+  lightning.spikeRejection(spike); 
+  int spikeVal=lightning.readSpikeRejection();
+  Serial.print("Spike Rejection is set to: ");
+  Serial.println(spikeVal);
+  // This setting will change when the lightning detector issues an interrupt.
+  // For example you will only get an interrupt after five lightning strikes
+  // instead of one. Default is one, and it takes settings of 1, 5, 9 and 16.   
+  // Followed by its corresponding read function. Default is zero. 
+  lightning.lightningThreshold(lightningThresh); 
+  uint8_t lightVal = lightning.readLightningThreshold();
+  Serial.print("The number of strikes before interrupt is triggerd: "); 
+  Serial.println(lightVal); 
+  // When the distance to the storm is estimated, it takes into account other
+  // lightning that was sensed in the past 15 minutes. If you want to reset
+  // time, then you can call this function. 
+  //lightning.clearStatistics(); 
+  // The power down function has a BIG "gotcha". When you wake up the board
+  // after power down, the internal oscillators will be recalibrated. They are
+  // recalibrated according to the resonance frequency of the antenna - which
+  // should be around 500kHz. It's highly recommended that you calibrate your
+  // antenna before using these two functions, or you run the risk of schewing
+  // the timing of the chip. 
+  //lightning.powerDown(); 
+  //delay(1000);
+  //if( lightning.wakeUp() ) 
+   // Serial.println("Successfully woken up!");  
+  //else 
+    //Serial.println("Error recalibrating internal osciallator on wake up."); 
+  // Set too many features? Reset them all with the following function.
+  lightning.resetSettings();
 }
 
 void loop()
 {
-  // here we go into loop checking if interrupt has been triggered, which kind of defeats
-  // the whole purpose of interrupts, but in real life you could put your chip to sleep
-  // and lower power consumption or do other nifty things
-
-  // I prefer to move this code inside the interrupt routine itself
-  // Here I leave only some code to display "Waiting…" so I know everything works
-
-  delay(1000);
-  Serial.println("Waiting…");
-}
-
-void printAS3935Registers()
-{
-  int noiseFloor = AS3935.getNoiseFloor();
-  int spikeRejection = AS3935.getSpikeRejection();
-  int watchdogThreshold = AS3935.getWatchdogThreshold();
-  Serial.print("Noise floor is: ");
-  Serial.println(noiseFloor,DEC);
-  Serial.print("Spike rejection is: ");
-  Serial.println(spikeRejection,DEC);
-  Serial.print("Watchdog threshold is: ");
-  Serial.println(watchdogThreshold,DEC);
-}
-
-// this is implementation of SPI transfer that gets passed to AS3935
-// you can (hopefully) wrap any SPI implementation in this
-byte SPItransfer(byte sendByte)
-{
-  return SPI.transfer(sendByte);
-}
-
-// this is irq handler for AS3935 interrupts, has to return void and take no arguments
-// always make code in interrupt handlers fast and short
-void AS3935Irq()
-{
-  // there is no need for this flag anymore
-  // AS3935IrqTriggered = 1;
-
-  // I move all the code for dysplaiying events inside the interrupt routine
-  // again there is no need for this flag
-  // reset the flag
-  // AS3935IrqTriggered = 0;
-  // first step is to find out what caused interrupt
-  // as soon as we read interrupt cause register, irq pin goes low
-    int irqSource = AS3935.interruptSource();
-    // returned value is bitmap field, bit 0 – noise level too high, bit 2 – disturber detected, and finally bit 3 – lightning!
-    if (irqSource & 0b0001)
-      Serial.println("Noise level too high, try adjusting noise floor");
-    if (irqSource & 0b0100)
-      Serial.println("Disturber detected");
-    if (irqSource & 0b1000)
+  if(digitalRead(lightningInt) == HIGH){
+    // Hardware has alerted us to an event, now we read the interrupt register
+    // to see exactly what it is. 
+    intVal = lightning.readInterruptReg();
+    if(intVal == NOISE_INT)
     {
-      // need to find how far that lightning stroke, function returns approximate distance in kilometers,
-      // where value 1 represents storm in detector's near victinity, and 63 – very distant, out of range stroke
-      // everything in between is just distance in kilometers
-      int strokeDistance = AS3935.lightningDistanceKm();
-      if (strokeDistance == 1)
-        Serial.println("Storm overhead, watch out!");
-      if (strokeDistance == 63)
-        Serial.println("Out of range lightning detected.");
-      if (strokeDistance < 63 && strokeDistance > 1)
-      {
-        Serial.print("Lightning detected ");
-        Serial.print(strokeDistance,DEC);
-        Serial.println(" kilometers away.");
-      }
+      Serial.println("Noise."); 
     }
+    else if(intVal == DISTURBER_INT)
+    {
+      Serial.println("Disturber."); 
+    }
+    else if(intVal == LIGHTNING_INT)
+    {
+      Serial.println("Lightning Strike Detected!"); 
+      // Lightning! Now how far away is it? Distance estimation takes into
+      // account previously seen events. 
+      byte distance = lightning.distanceToStorm(); 
+      Serial.print("Approximately: "); 
+      Serial.print(distance); 
+      Serial.println("km away!"); 
+      // "Lightning Energy" and I do place into quotes intentionally, is a pure
+      // number that does not have any physical meaning. 
+      long lightEnergy = lightning.lightningEnergy(); 
+      Serial.print("Lightning Energy: "); 
+      Serial.println(lightEnergy); 
+    }
+  }
 }
